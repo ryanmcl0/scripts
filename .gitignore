@@ -211,5 +211,7 @@ __marimo__/
 !README.md
 *.txt
 *.pdf
+*.gpx
+*.kml
 
 .DS_Store

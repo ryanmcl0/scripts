@@ -66,7 +66,7 @@ Now, instead of hundreds of manual edits to compile my write ups and photos into
 
 ## Features ✨
 
-- **Custom Fonts & Dark Theme Formatting 🎨**  
+- **Custom Fonts & Theme Formatting 🎨**  
   - Supports custom background, justification and fonts for headings and body text that automatically matches my existing style, design and layout preferences, but is still customisable.
   - *Why this matters:* Now I can automatically produce a near idential copy of what it would have been in Adobe Portfolio, without the manual effort. I now also have a hard copy saved on my hard drive, instead of only an online version on Adobe servers.
 
@@ -98,6 +98,12 @@ Now, instead of hundreds of manual edits to compile my write ups and photos into
 
 - **Dynamic page numbering 📝** 
     - The script uses a custom `NumberedCanvas` class to track total page count and automatically insert "X of Y" on every page. This ensures accurate page numbers for even very large documents, without requiring a separate manual count or pre-calculation.
+
+- **Custom headers & footers 📰**  
+  - Adds consistent header text (e.g., document title) to the top of every page.  
+  - Inserts footer text and automatic page numbering at the bottom.  
+  - *Why this matters:*  Keeps the document professional and ensures readers always know where they are.
+
 
 ---
 
