@@ -1,5 +1,5 @@
 '''
-Combine daily GPX track files from a trip into one GPX
+Combine daily GPX track files from a trip into one GPX, and generates a KML less than 5MB to import routes into Google MyMaps
 '''
 
 import glob
