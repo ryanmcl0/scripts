@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import time
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -14,13 +15,25 @@ from reportlab.platypus.frames import Frame
 from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfgen import canvas
 
+def has_chinese_characters(text):
+    """Check if text contains Chinese characters (CJK Unified Ideographs)"""
+    if not text:
+        return False
+    # Check for Chinese characters in the basic CJK range
+    for char in text:
+        if '\u4e00' <= char <= '\u9fff':
+            return True
+    return False
+
 def register_fonts():
     """
     Try to register preferred custom fonts. Falls back to Helvetica if not found.
-    Also attempts to register Arial from common system locations for header/footer.
+    Also attempts to register fonts that support Chinese characters.
     """
     heading_font = 'Helvetica-Bold'
     body_font = 'Helvetica'
+    chinese_font = None
+    
     # Try custom fonts (optional)
     try:
         if os.path.exists('/Library/Fonts/BebasKai.ttf'):
@@ -48,9 +61,60 @@ def register_fonts():
         except Exception:
             continue
 
-    return heading_font, body_font
+    # Try to register fonts that support Chinese characters
+    chinese_font_paths = [
+        # macOS
+        '/System/Library/Fonts/STHeiti Light.ttc',
+        '/System/Library/Fonts/STHeiti Medium.ttc', 
+        '/Library/Fonts/Arial Unicode MS.ttf',
+        '/System/Library/Fonts/PingFang.ttc',
+        '/System/Library/Fonts/Hiragino Sans GB.ttc',
+        '/System/Library/Fonts/STSong.ttf',
+        
+        # Windows
+        r'C:\Windows\Fonts\simsun.ttc',
+        r'C:\Windows\Fonts\msyh.ttc',
+        r'C:\Windows\Fonts\simhei.ttf',
+        r'C:\Windows\Fonts\simkai.ttf',
+        
+        # Linux (common Chinese font packages)
+        '/usr/share/fonts/truetype/arphic/uming.ttc',
+        '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+        '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+        '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+    ]
+    
+    for font_path in chinese_font_paths:
+        try:
+            if os.path.exists(font_path):
+                if font_path.endswith('.ttc'):
+                    # TTC files may contain multiple fonts, try different subfont indices
+                    for subfont_index in [0, 1, 2]:
+                        try:
+                            pdfmetrics.registerFont(TTFont('ChineseFont', font_path, subfontIndex=subfont_index))
+                            chinese_font = 'ChineseFont'
+                            print(f"✓ Registered Chinese font: {font_path} (subfont {subfont_index})")
+                            break
+                        except Exception:
+                            continue
+                    if chinese_font:
+                        break
+                else:
+                    pdfmetrics.registerFont(TTFont('ChineseFont', font_path))
+                    chinese_font = 'ChineseFont'
+                    print(f"✓ Registered Chinese font: {font_path}")
+                    break
+        except Exception as e:
+            continue
+    
+    if not chinese_font:
+        print("⚠️  No Chinese font found. Chinese characters may not display correctly.")
+        chinese_font = body_font  # fallback to regular font
 
-def setup_styles(heading_font, body_font):
+    return heading_font, body_font, chinese_font
+
+def setup_styles(heading_font, body_font, chinese_font):
     """Create and adjust paragraph styles (Heading3 is 25pt)."""
     styles = getSampleStyleSheet()
 
@@ -92,6 +156,49 @@ def setup_styles(heading_font, body_font):
     styles['BodyText'].leading = 16
     styles['BodyText'].spaceAfter = 6   # reduced spacing between paragraphs
     styles['BodyText'].textColor = white
+
+    # Chinese text style
+    styles.add(ParagraphStyle(
+        'ChineseText',
+        parent=styles['BodyText'],
+        fontName=chinese_font,
+        fontSize=12,
+        leading=16,
+        spaceAfter=6,
+        textColor=white
+    ))
+
+    # Chinese heading styles
+    styles.add(ParagraphStyle(
+        'ChineseHeading1',
+        parent=styles['Heading1'],
+        fontName=chinese_font,
+        fontSize=30,
+        leading=36,
+        spaceAfter=20,
+        textColor=white
+    ))
+
+    styles.add(ParagraphStyle(
+        'ChineseHeading2',
+        parent=styles['Heading2'],
+        fontName=chinese_font,
+        fontSize=24,
+        leading=30,
+        spaceAfter=16,
+        textColor=white
+    ))
+
+    styles.add(ParagraphStyle(
+        'ChineseHeading3',
+        parent=styles['Heading3'],
+        fontName=chinese_font,
+        fontSize=25,
+        leading=30,
+        spaceAfter=20,
+        textColor=white,
+        alignment=TA_CENTER
+    ))
 
     # Code style
     if 'Code' not in styles:
@@ -147,10 +254,6 @@ def strip_md_list_markers(line):
 def find_fallback_path(original_path):
     """
     Create a fallback path by replacing any volume mount with /Volumes/RYAN/
-    
-    Examples:
-    - /Volumes/My Passport for Mac/Edits/... -> /Volumes/RYAN/Edits/...
-    - /Volumes/SomeOtherDrive/Photos/... -> /Volumes/RYAN/Photos/...
     """
     if not original_path.startswith('/Volumes/'):
         return None
@@ -183,6 +286,20 @@ def find_image_file(filepath):
     # Neither found
     return None, False
 
+def get_appropriate_style(text, styles, style_prefix):
+    """
+    Choose the appropriate style based on whether text contains Chinese characters.
+    """
+    if has_chinese_characters(text):
+        chinese_style_name = f"Chinese{style_prefix}"
+        if chinese_style_name in styles:
+            return styles[chinese_style_name]
+        else:
+            # Fallback to ChineseText for body text
+            return styles.get('ChineseText', styles['BodyText'])
+    else:
+        return styles[style_prefix]
+
 def process_line(line, styles, story, missing_files=None):
     r"""
     Process a single line and add appropriate elements to story.
@@ -191,6 +308,7 @@ def process_line(line, styles, story, missing_files=None):
     - Un-escapes markdown punctuation & underscores (Google Docs) while preserving Windows paths.
     - Tight paragraph spacing and small image spacer.
     - Now includes fallback path functionality for missing images.
+    - Uses Chinese fonts for text containing Chinese characters.
     """
     if line is None:
         return None
@@ -209,15 +327,21 @@ def process_line(line, styles, story, missing_files=None):
         story.append(Spacer(1, 6))
         return None
 
-    # Headings
+    # Headings - choose appropriate font based on content
     if trimmed.startswith("### "):
-        story.append(Paragraph(trimmed[4:], styles['Heading3']))
+        heading_text = trimmed[4:]
+        style = get_appropriate_style(heading_text, styles, 'Heading3')
+        story.append(Paragraph(heading_text, style))
         return None
     elif trimmed.startswith("## "):
-        story.append(Paragraph(trimmed[3:], styles['Heading2']))
+        heading_text = trimmed[3:]
+        style = get_appropriate_style(heading_text, styles, 'Heading2')
+        story.append(Paragraph(heading_text, style))
         return None
     elif trimmed.startswith("# "):
-        story.append(Paragraph(trimmed[2:], styles['Heading1']))
+        heading_text = trimmed[2:]
+        style = get_appropriate_style(heading_text, styles, 'Heading1')
+        story.append(Paragraph(heading_text, style))
         return None
 
     # Code block (single backticks)
@@ -277,19 +401,22 @@ def process_line(line, styles, story, missing_files=None):
     # Fallback bullet handling if original raw line had a marker (rare after stripping)
     if raw.lstrip().startswith("- ") or raw.lstrip().startswith("* "):
         bullet_text = trimmed.lstrip('-* ').strip()
-        story.append(Paragraph(f"• {bullet_text}", styles['BodyText']))
+        style = get_appropriate_style(bullet_text, styles, 'BodyText')
+        story.append(Paragraph(f"• {bullet_text}", style))
         return None
 
     # Numbered list
     if re.match(r"^\d+\.\s", trimmed):
-        story.append(Paragraph(trimmed, styles['BodyText']))
+        style = get_appropriate_style(trimmed, styles, 'BodyText')
+        story.append(Paragraph(trimmed, style))
         return None
 
-    # Regular paragraph: support **bold** and *italic*
+    # Regular paragraph: support **bold** and *italic*, choose appropriate font
     text = trimmed
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-    story.append(Paragraph(text, styles['BodyText']))
+    style = get_appropriate_style(text, styles, 'BodyText')
+    story.append(Paragraph(text, style))
     return None
 
 class DarkPageTemplate(PageTemplate):
@@ -353,6 +480,16 @@ class NumberedCanvas(canvas.Canvas):
         self.setFont(font_name, 6)
         self.drawRightString(A4[0] - 50, 10, f"{page_num}/{total_pages}")
 
+def format_duration(seconds):
+    """Format duration in a human-readable format"""
+    if seconds < 1:
+        return f"{seconds*1000:.0f}ms"
+    elif seconds < 60:
+        return f"{seconds:.1f}s"
+    else:
+        minutes = int(seconds // 60)
+        remaining_seconds = seconds % 60
+        return f"{minutes}m {remaining_seconds:.1f}s"
 
 # Global document title (first ### heading)
 document_title = ""
@@ -362,11 +499,11 @@ def build_pdf(input_file, output_file, date="June 2024"):
 
     if not os.path.exists(input_file):
         print(f"Error: Input file '{input_file}' not found.")
-        return False
+        return False, 0
 
     print("Setting up fonts and styles...")
-    heading_font, body_font = register_fonts()
-    styles = setup_styles(heading_font, body_font)
+    heading_font, body_font, chinese_font = register_fonts()
+    styles = setup_styles(heading_font, body_font, chinese_font)
 
     header_font = 'Arial' if 'Arial' in pdfmetrics.getRegisteredFontNames() else 'Helvetica'
 
@@ -409,6 +546,8 @@ def build_pdf(input_file, output_file, date="June 2024"):
 
     try:
         print("Reading input file...")
+        processing_start = time.time()
+        
         with open(input_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
@@ -434,6 +573,9 @@ def build_pdf(input_file, output_file, date="June 2024"):
                 print(f"Warning: Error processing line {line_num}: {e}")
                 story.append(Paragraph(raw_line.strip(), styles['BodyText']))
 
+        processing_end = time.time()
+        processing_time = processing_end - processing_start
+
         # Ensure "Ryan McLoughlin" is the first thing in the content
         if not story or not (hasattr(story[0], 'getPlainText') and story[0].getPlainText().strip() == "Ryan McLoughlin"):
             story.insert(0, Paragraph("Ryan McLoughlin", styles['Heading3']))
@@ -458,6 +600,7 @@ def build_pdf(input_file, output_file, date="June 2024"):
 
         print()
         print("Building PDF document (this may take a moment)...")
+        pdf_build_start = time.time()
 
         # Calculate total pages for footer (this is an approximation)
         estimated_pages = max(1, len(story) // 20)  # Rough estimate
@@ -465,9 +608,14 @@ def build_pdf(input_file, output_file, date="June 2024"):
 
         # Build the PDF
         doc.build(story, canvasmaker=NumberedCanvas)
+        
+        pdf_build_end = time.time()
+        pdf_build_time = pdf_build_end - pdf_build_start
+        total_time = pdf_build_end - processing_start
+        
         print(f"✓ PDF successfully created: {output_file}")
 
-        # Final summary
+        # Final summary with timing
         print()
         print("=== SUMMARY ===")
         if missing_files:
@@ -481,12 +629,17 @@ def build_pdf(input_file, output_file, date="June 2024"):
                 print(f"📁 {fallback_images} images found via fallback paths")
         if document_title:
             print(f"📖 Title: {document_title}")
+        
+        # Timing breakdown
+        print(f"⏱️  Processing time: {format_duration(processing_time)}")
+        print(f"⏱️  PDF build time: {format_duration(pdf_build_time)}")
+        print(f"⏱️  Total execution time: {format_duration(total_time)}")
 
-        return True
+        return True, total_time
 
     except Exception as e:
         print(f"Error creating PDF: {e}")
-        return False
+        return False, 0
 
 def main():
     """Main entry point - uses hardcoded file names"""
@@ -499,7 +652,13 @@ def main():
     print(f"Date: {date}")
     print()
 
-    success = build_pdf(input_file, output_file, date)
+    # Start overall timing
+    start_time = time.time()
+    success, build_time = build_pdf(input_file, output_file, date)
+    end_time = time.time()
+    
+    # Total time includes any setup/cleanup outside of build_pdf
+    total_script_time = end_time - start_time
 
     print()
     if success:
