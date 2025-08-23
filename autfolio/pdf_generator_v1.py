@@ -148,10 +148,6 @@ def strip_md_list_markers(line):
 def find_fallback_path(original_path):
     """
     Create a fallback path by replacing any volume mount with /Volumes/RYAN/
-    
-    Examples:
-    - /Volumes/My Passport for Mac/Edits/... -> /Volumes/RYAN/Edits/...
-    - /Volumes/SomeOtherDrive/Photos/... -> /Volumes/RYAN/Photos/...
     """
     if not original_path.startswith('/Volumes/'):
         return None
