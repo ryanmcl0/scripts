@@ -811,31 +811,35 @@ def build_pdf(input_file, output_file, date="June 2024"):
         return False, 0
 
 def main():
-    """Main entry point - uses hardcoded file names"""
-    input_file = "fullinput.md"
-    output_file = "fullOutput_compressed.pdf"
+    """Main entry point - uses input from 'source_files' and outputs to 'outputs' folder"""
+    input_dir = "source_files"
+    input_file_name = "testinput.md"
+    input_file = os.path.join(input_dir, input_file_name)
+    
+    # Create outputs folder if it doesn't exist
+    output_dir = "outputs"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate output file path with same base name as input
+    base_name = os.path.splitext(input_file_name)[0]
+    output_file = os.path.join(output_dir, f"{base_name}.pdf")
+
     date = "June 2024"  # Change this to your desired date
 
     print("=== Optimized Markdown to PDF Converter ===")
     print(f"Converting '{input_file}' to '{output_file}'...")
-    print(f"Date: {date}")
-    print()
+    print(f"Date: {date}\n")
 
-    # Check if Pillow is available for optimization
     if PIL_AVAILABLE:
-        print("🚀 Image optimization enabled - expect significantly smaller file sizes!")
+        print("🚀 Image optimization enabled - expect significantly smaller file sizes!\n")
     else:
-        print("⚠️  Image optimization unavailable - install Pillow for best results")
-        print("   Run: pip install Pillow")
-    
-    print()
+        print("⚠️ Image optimization unavailable - install Pillow for best results\n")
 
     # Start overall timing
     start_time = time.time()
     success, build_time = build_pdf(input_file, output_file, date)
     end_time = time.time()
     
-    # Total time includes any setup/cleanup outside of build_pdf
     total_script_time = end_time - start_time
 
     print()
@@ -845,6 +849,7 @@ def main():
             print("✨ Images have been optimized for PDF while maintaining quality")
             print("📉 File size should be dramatically smaller than before")
             print("⚡ Future runs will be much faster due to optimized processing")
+        print(f"⏱️ Total script execution time: {build_time:.2f}s")
     else:
         print("❌ Conversion failed!")
         sys.exit(1)
