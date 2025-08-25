@@ -1,7 +1,3 @@
-'''
-Combine daily GPX track files from a trip into one GPX, and generates a KML less than 5MB to import routes into Google MyMaps
-'''
-
 import glob
 import gpxpy
 import gpxpy.gpx
@@ -9,14 +5,21 @@ import os
 import simplekml
 import tempfile
 
-def merge_with_waypoints_and_kml_limit(input_folder, output_prefix, gap_distance=0.0001, max_kml_size=5*1024*1024):
+def merge_with_waypoints_and_kml_limit(input_folder, gap_distance=0.0001, max_kml_size=5*1024*1024):
     """
     Merge multiple GPX files into one track (GPX stays intact).
     Adds a waypoint at the end of each file and a tiny gap in the track.
     Generates a KML file downsampled to fit under max_kml_size (default 5MB).
+    Output file names are based on the input folder name.
     """
     gpx_files = sorted(glob.glob(f"{input_folder}/*.gpx"))
-    
+    if not gpx_files:
+        print("⚠️ No GPX files found in folder:", input_folder)
+        return
+
+    # Use folder name for output prefix
+    output_prefix = os.path.basename(os.path.normpath(input_folder))
+
     # --- GPX setup ---
     merged_gpx = gpxpy.gpx.GPX()
     merged_track = gpxpy.gpx.GPXTrack()
@@ -60,7 +63,7 @@ def merge_with_waypoints_and_kml_limit(input_folder, output_prefix, gap_distance
         print(f"Added {file} with waypoint and gap.")
 
     # --- Save GPX ---
-    gpx_output_file = f"{output_prefix}.gpx"
+    gpx_output_file = os.path.join(input_folder, f"{output_prefix}.gpx")
     with open(gpx_output_file, 'w') as f:
         f.write(merged_gpx.to_xml())
     print(f"\n✅ GPX saved: {gpx_output_file}")
@@ -75,9 +78,8 @@ def merge_with_waypoints_and_kml_limit(input_folder, output_prefix, gap_distance
         linestring.extrude = 1
 
         # Add waypoints to KML
-        for file in gpx_files:
-            last_point = merged_gpx.waypoints[[wp.name for wp in merged_gpx.waypoints].index(os.path.basename(file))]
-            kml.newpoint(name=last_point.name, coords=[(last_point.longitude, last_point.latitude, last_point.elevation or 0)])
+        for wp in merged_gpx.waypoints:
+            kml.newpoint(name=wp.name, coords=[(wp.longitude, wp.latitude, wp.elevation or 0)])
 
         # Save temporarily to check size
         with tempfile.NamedTemporaryFile(delete=True) as tmp:
@@ -87,12 +89,11 @@ def merge_with_waypoints_and_kml_limit(input_folder, output_prefix, gap_distance
             break
         sample_rate += 1
 
-    kml_output_file = f"{output_prefix}.kml"
+    kml_output_file = os.path.join(input_folder, f"{output_prefix}.kml")
     kml.save(kml_output_file)
     print(f"✅ KML saved: {kml_output_file} (sampled every {sample_rate} points to fit {max_kml_size/1024/1024:.1f} MB)")
 
 # --- Example usage ---
 merge_with_waypoints_and_kml_limit(
-    "/Users/ryanmcloughlin/Downloads/2025 China CNY GPX",
-    "merged_track"
+    "/Users/ryanmcloughlin/Downloads/2025 South Xinjiang"
 )
