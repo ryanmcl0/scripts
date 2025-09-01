@@ -213,5 +213,6 @@ __marimo__/
 *.pdf
 *.gpx
 *.kml
+*.png
 
 .DS_Store
