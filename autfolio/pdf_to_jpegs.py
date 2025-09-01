@@ -35,8 +35,8 @@ def pdf_to_images(pdf_path, output_folder, dpi=300, image_format="JPEG"):
 
 if __name__ == "__main__":
     # === EDIT THESE VALUES ===
-    pdf_path = "testOutput_compressed.pdf"                 # Path to PDF
-    output_folder = "My_Portfolio_Images"  # Folder where images will be stored
+    pdf_path = "/Users/ryanmcloughlin/Documents/Scripts/scripts/autfolio/output_gemini/China 2025 North.pdf"                 # Path to PDF
+    output_folder = "China 2025 North"  # Folder where images will be stored
     dpi = 300                              # Adjust DPI for resolution
     image_format = "PNG"                  # "JPEG" for smaller files, "PNG" for lossless
 
