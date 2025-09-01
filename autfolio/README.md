@@ -1,5 +1,7 @@
 # Blog Workflow
 
+[out of date!! will update soon (maybe)...]
+
 This repo contains scripts I use to turn long-form travel photo-documentary projects into shareable, presentable and consise formats.  
 The main goal: **reduce hundreds of hours of repetitive publishing work into a mostly automated flow**.
 
