@@ -30,7 +30,8 @@ except ImportError:
     print("   Images will be used without optimization (larger file sizes)")
 
 # --- NEW: Enhanced Configuration for the flexible layout engine ---
-MAX_IMAGES_PER_ROW = 3
+LAYOUT_RANDOM_SEED = 1756844636       # Set to an integer for reproducible layouts, or None for random each run
+MAX_IMAGES_PER_ROW = 3         # Maximum images allowed in a single collage row
 PANORAMIC_ASPECT_RATIO = 2      # Aspect ratio (width/height) to consider an image panoramic
 VERTICAL_ASPECT_RATIO_THRESHOLD = 0.9 # Aspect ratio (width/height) to consider an image vertical
 LANDSCAPE_ASPECT_RATIO_THRESHOLD = 1.1 # <-- NEW: Aspect ratio to consider an image landscape
@@ -1243,12 +1244,26 @@ def main():
     input_dir = "source_files"
     input_file_name = "China 2025 North test1.md"
     input_file = os.path.join(input_dir, input_file_name)
+
+    seed_was_specified = LAYOUT_RANDOM_SEED is not None
+    if not seed_was_specified:
+        # No seed is specified, so generate a new one for this run
+        current_seed = int(time.time())
+    else:
+        # A seed has been specified, use it
+        current_seed = LAYOUT_RANDOM_SEED
+    
+    # Apply the seed to the random number generator so it affects the layout
+    random.seed(current_seed)
+    
+    # Apply the seed to the random number generator
+    random.seed(current_seed)
     
     # --- PAGE SIZE SELECTION ---
     # Choose one of the following options by uncommenting the desired block.
     
     # 1. Standard A4 Portrait (Default)
-    page_size_name = "A4_Portrait"
+    page_size_name = "A4_Portrait_seed"
     page_size = A4
     
     # 2. A4 Landscape
@@ -1301,6 +1316,19 @@ def main():
     print()
     if success:
         print("🎉 Conversion completed successfully!")
+
+        print() # Add a blank line for spacing
+        if not seed_was_specified:
+            print(f"🌱 A new random layout was generated using seed: {current_seed}")
+            print("   To reuse this exact layout, set LAYOUT_RANDOM_SEED in the script to this number.")
+        else:
+            print(f"🌱 The layout was generated using the specified seed: {current_seed}")
+
+        # --- Word count in final summary ---
+        if final_stats['word_count'] > 0:
+            print(f"✍️  Document word count: {final_stats['word_count']} words")
+        print(f"⏱️ Total script execution time: {format_duration(build_time)}")
+
         # --- Word count in final summary ---
         if final_stats['word_count'] > 0:
             print(f"✍️  Document word count: {final_stats['word_count']} words")
