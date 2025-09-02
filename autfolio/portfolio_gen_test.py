@@ -7,7 +7,7 @@ import time
 import io
 import random
 
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import Paragraph, Spacer, Image, Table, TableStyle, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -17,7 +17,7 @@ from reportlab.platypus.doctemplate import PageTemplate, BaseDocTemplate
 from reportlab.platypus.frames import Frame
 from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfgen import canvas
-from reportlab.lib.units import inch
+from reportlab.lib.units import inch, mm
 
 # Import PIL for image optimization
 try:
@@ -193,9 +193,9 @@ def setup_styles(heading_font, body_font, chinese_font):
 
     # Body text tightened spacing
     styles['BodyText'].fontName = body_font
-    styles['BodyText'].fontSize = 12
+    styles['BodyText'].fontSize = 11
     styles['BodyText'].leading = 16
-    styles['BodyText'].spaceAfter = 0   # reduced spacing between paragraphs
+    styles['BodyText'].spaceAfter = 0   # reduced spacing between paragraphs (spacing comes default from new empty lines between sections in the source markdown file)
     styles['BodyText'].textColor = white
 
     # Chinese text style
@@ -379,7 +379,7 @@ def get_image_aspect_ratio(image_path_or_buffer):
     except Exception:
         return 1.5  # Default landscape aspect ratio
 
-def create_image_row(image_data_list, max_width, custom_margin=None):
+def create_image_row(image_data_list, max_width, max_height, custom_margin=None):
     """
     Creates a single row of images as a ReportLab Table with horizontal margins.
     All images in the row are scaled to the same height.
@@ -392,7 +392,6 @@ def create_image_row(image_data_list, max_width, custom_margin=None):
     margin = custom_margin if custom_margin is not None else HORIZONTAL_MARGIN
 
     num_images = len(image_data_list)
-    max_height = A4[1] - 140
 
     # Calculate total margin width using the determined margin value
     total_margin_width = (num_images - 1) * margin if num_images > 1 else 0
@@ -404,7 +403,7 @@ def create_image_row(image_data_list, max_width, custom_margin=None):
     if total_aspect_ratio == 0:  # Avoid division by zero
         return None
 
-    # Calculate the ideal height for images in this row
+    # Calculate the ideal height for images in this row, capped by max_height
     row_height = available_image_width / total_aspect_ratio
     if row_height > max_height:
         row_height = max_height
@@ -456,36 +455,59 @@ def is_landscape_dji(image_data):
     is_dji = "dji" in os.path.basename(filepath).lower()
     return is_landscape and is_dji
 
-def create_dji_vertical_grid(image_data_list, max_width, custom_margin=None):
+def create_dji_vertical_grid(image_data_list, max_width, max_height, custom_margin=None):
     """
     Creates a multi-row grid for 3 or 4 vertical DJI images with consistent
     horizontal and vertical margins. Returns a list of flowables.
-    Can accept a custom_margin, otherwise falls back to the global HORIZONTAL_MARGIN.
+    --- NEW: Now scales the entire grid down to fit within max_height if necessary. ---
     """
     num_images = len(image_data_list)
     if not (3 <= num_images <= 4):
-        return None # This function is only for 3 or 4 images
+        return None  # This function is only for 3 or 4 images
 
-    # Determine which margin value to use for this grid
     margin = custom_margin if custom_margin is not None else HORIZONTAL_MARGIN
+    
+    # --- Step 1: Calculate initial dimensions without constraints ---
+    initial_col_width = (max_width - margin) / 2
+    top_row_data = image_data_list[:2]
+    bottom_row_data = image_data_list[2:]
 
-    # Base width for each image column in a 2-column grid
-    col_width = (max_width - margin) / 2
+    top_row_height = 0
+    if top_row_data:
+        # Height of the row is determined by the tallest image in it
+        top_row_height = max((initial_col_width / aspect_ratio) for _, aspect_ratio, *_ in top_row_data if aspect_ratio > 0)
+
+    bottom_row_height = 0
+    if bottom_row_data:
+        bottom_row_height = max((initial_col_width / aspect_ratio) for _, aspect_ratio, *_ in bottom_row_data if aspect_ratio > 0)
+
+    total_initial_height = top_row_height + bottom_row_height
+    if bottom_row_data:
+        total_initial_height += VERTICAL_MARGIN
+
+    # --- Step 2: Check if scaling is needed and calculate final dimensions ---
+    scale_factor = 1.0
+    if total_initial_height > max_height:
+        scale_factor = max_height / total_initial_height
     
-    # --- Create the top row of images ---
-    top_row_images_data = image_data_list[:2]
+    final_col_width = initial_col_width * scale_factor
+    final_top_row_height = top_row_height * scale_factor
+    final_bottom_row_height = bottom_row_height * scale_factor
+    final_vertical_margin = VERTICAL_MARGIN * scale_factor
+
+    # --- Step 3: Build the grid using the final, scaled dimensions ---
+    grid_parts = []
+
+    # Create the top row of images
     top_row_flowables = []
-    for img_buf, aspect_ratio, *_ in top_row_images_data:
-        if aspect_ratio > 0:
-            img_height = col_width / aspect_ratio
-            top_row_flowables.append(Image(img_buf, width=col_width, height=img_height))
+    for img_buf, aspect_ratio, *_ in top_row_data:
+        img_w = final_top_row_height * aspect_ratio
+        top_row_flowables.append(Image(img_buf, width=img_w, height=final_top_row_height))
     
-    # Insert the margin spacer between the two images
     if len(top_row_flowables) == 2:
         top_row_flowables.insert(1, None)
 
-    # Create the top row table with an explicit margin column
-    top_row_col_widths = [col_width, margin, col_width]
+    top_row_col_widths = [final_col_width, margin, final_col_width]
     top_row_table = Table([top_row_flowables], colWidths=top_row_col_widths)
     top_row_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -494,30 +516,23 @@ def create_dji_vertical_grid(image_data_list, max_width, custom_margin=None):
         ('TOPPADDING', (0, 0), (-1, -1), 0),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
     ]))
+    grid_parts.append(top_row_table)
 
-    # This list will hold all parts of our final grid
-    grid_parts = [top_row_table]
-
-    # --- Create the bottom row of images, if they exist ---
-    bottom_row_images_data = image_data_list[2:]
-    if bottom_row_images_data:
-        # Add the consistent vertical spacer
-        grid_parts.append(Spacer(1, VERTICAL_MARGIN)) 
+    # Create the bottom row of images, if they exist
+    if bottom_row_data:
+        grid_parts.append(Spacer(1, final_vertical_margin))
 
         bottom_row_flowables = []
-        for img_buf, aspect_ratio, *_ in bottom_row_images_data:
-            if aspect_ratio > 0:
-                img_height = col_width / aspect_ratio
-                bottom_row_flowables.append(Image(img_buf, width=col_width, height=img_height))
+        for img_buf, aspect_ratio, *_ in bottom_row_data:
+            img_w = final_bottom_row_height * aspect_ratio
+            bottom_row_flowables.append(Image(img_buf, width=img_w, height=final_bottom_row_height))
         
-        # If there are two images in the bottom row, add the margin spacer
         if len(bottom_row_flowables) == 2:
             bottom_row_flowables.insert(1, None)
-            bottom_row_col_widths = [col_width, margin, col_width]
-        else: # Only one image
-            bottom_row_col_widths = [col_width]
+            bottom_row_col_widths = [final_col_width, margin, final_col_width]
+        else:
+            bottom_row_col_widths = [final_col_width]
         
-        # Create the bottom row as its own table
         bottom_row_table = Table([bottom_row_flowables], colWidths=bottom_row_col_widths)
         bottom_row_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -651,7 +666,7 @@ def is_image_line(line):
     return img_match is not None
 
 # --- NEW HELPER FUNCTION ---
-def create_layouts_for_remaining_images(image_data_list, max_width, optimization_stats):
+def create_layouts_for_remaining_images(image_data_list, max_width, max_height, optimization_stats):
     """
     Arranges a list of standard (non-special-cased) images using weighted random logic.
     This is called by process_image_section AFTER high-priority images have been handled.
@@ -676,14 +691,14 @@ def create_layouts_for_remaining_images(image_data_list, max_width, optimization
         current_row_data = image_data_list[i:end_index]
 
         if current_row_data:
-            layouts.append(create_image_row(current_row_data, max_width))
+            layouts.append(create_image_row(current_row_data, max_width, max_height))
             if len(current_row_data) > 1:
                 optimization_stats['collages_created'] += 1
         i = end_index
 
     return layouts
 
-def process_image_section(image_lines, styles, story, missing_files=None, optimization_stats=None):
+def process_image_section(image_lines, styles, story, missing_files=None, optimization_stats=None, max_width=A4[0]-100, max_height=A4[1]-140):
     """
     Processes a single section of consecutive images, applying a multi-pass
     grouping strategy to collage images within this section.
@@ -765,7 +780,6 @@ def process_image_section(image_lines, styles, story, missing_files=None, optimi
             
     # --- Step 3: Generate layouts for this section in order of priority ---
     section_layouts = []
-    max_width = A4[0] - 100
 
     # Priority 1: All vertical DJI images in this section are grouped first.
     if dji_verticals:
@@ -777,14 +791,14 @@ def process_image_section(image_lines, styles, story, missing_files=None, optimi
             if len(chunk) == 2:
                 print(f"         -> Creating a 2-image side-by-side row (same height).")
                 # Pass the special margin only for this specific case
-                row_layout = create_image_row(chunk, max_width, custom_margin=DJI_DIPTYCH_MARGIN)
+                row_layout = create_image_row(chunk, max_width, max_height, custom_margin=DJI_DIPTYCH_MARGIN)
                 if row_layout:
                     section_layouts.append(row_layout)
                     optimization_stats['collages_created'] += 1
             elif len(chunk) >= 3:
                 print(f"         -> Creating a {len(chunk)}-image grid.")
                 # Pass the special margin to the grid function as well
-                grid = create_dji_vertical_grid(chunk, max_width, custom_margin=DJI_DIPTYCH_MARGIN)
+                grid = create_dji_vertical_grid(chunk, max_width, max_height, custom_margin=DJI_DIPTYCH_MARGIN)
                 if grid:
                     section_layouts.append(KeepTogether(grid))
                     optimization_stats['collages_created'] += 1
@@ -798,23 +812,23 @@ def process_image_section(image_lines, styles, story, missing_files=None, optimi
     if full_width_images:
         print(f"      -> Processing {len(full_width_images)} full-width image(s).")
         for image in full_width_images:
-            section_layouts.append(create_image_row([image], max_width))
+            section_layouts.append(create_image_row([image], max_width, max_height))
 
     # Priority 3: Panoramics.
     if panoramics:
         print(f"      -> Processing {len(panoramics)} panoramic image(s).")
         for pano in panoramics:
-            section_layouts.append(create_image_row([pano], max_width))
+            section_layouts.append(create_image_row([pano], max_width, max_height))
 
     # Priority 4: DJI Landscapes.
     if dji_landscapes:
         print(f"      -> Processing {len(dji_landscapes)} landscape DJI image(s).")
         for dji_land in dji_landscapes:
-            section_layouts.append(create_image_row([dji_land], max_width))
+            section_layouts.append(create_image_row([dji_land], max_width, max_height))
 
     # Finally, process all remaining images from this section.
     if others:
-        remaining_layouts = create_layouts_for_remaining_images(others, max_width, optimization_stats)
+        remaining_layouts = create_layouts_for_remaining_images(others, max_width, max_height, optimization_stats)
         section_layouts.extend(remaining_layouts)
 
     # --- Step 4: Append all generated layouts for this section to the story ---
@@ -825,7 +839,7 @@ def process_image_section(image_lines, styles, story, missing_files=None, optimi
     print(f"      -> Created {len(section_layouts)} layout(s) for this section.")
 
 # --- REWRITTEN process_lines_with_collaging to use the new section-based logic ---
-def process_lines_with_collaging(lines, styles, story, missing_files=None, optimization_stats=None):
+def process_lines_with_collaging(lines, styles, story, missing_files=None, optimization_stats=None, frame_width=A4[0]-100, frame_height=A4[1]-140):
     """
     Process lines, identifying consecutive image sections and processing them
     one section at a time to preserve separation by text content.
@@ -861,7 +875,7 @@ def process_lines_with_collaging(lines, styles, story, missing_files=None, optim
                 i += 1
             
             # --- PROCESS THE IDENTIFIED SECTION IMMEDIATELY ---
-            process_image_section(image_section, styles, story, missing_files, optimization_stats)
+            process_image_section(image_section, styles, story, missing_files, optimization_stats, max_width=frame_width, max_height=frame_height)
             continue
         
         # --- NEW: Word Count Logic for non-image lines ---
@@ -924,18 +938,19 @@ def process_lines_with_collaging(lines, styles, story, missing_files=None, optim
 
 
 class DarkPageTemplate(PageTemplate):
-    def __init__(self, id, frames, document_title="", date="", header_font='Arial', **kwargs):
+    def __init__(self, id, frames, document_title="", date="", header_font='Arial', pagesize=A4, **kwargs):
         PageTemplate.__init__(self, id, frames, **kwargs)
         self.document_title = document_title
         self.date = date
         self.header_font = header_font
+        self.page_width, self.page_height = pagesize
 
     def beforeDrawPage(self, canvas, doc):
         canvas.saveState()
 
         # Black background
         canvas.setFillColor(black)
-        canvas.rect(0, 0, A4[0], A4[1], fill=1, stroke=0)
+        canvas.rect(0, 0, self.page_width, self.page_height, fill=1, stroke=0)
 
         # Header/footer text in white
         canvas.setFillColor(white)
@@ -945,9 +960,9 @@ class DarkPageTemplate(PageTemplate):
         canvas.setFont(font_name, 6)  # 6pt as requested
 
         # Header: date (top-left) and optional title (top-center)
-        canvas.drawString(50, A4[1] - 12, self.date)
+        canvas.drawString(50, self.page_height - 12, self.date)
         if self.document_title:
-            canvas.drawCentredString(A4[0] / 2, A4[1] - 12, self.document_title)
+            canvas.drawCentredString(self.page_width / 2, self.page_height - 12, self.document_title)
 
         # Footer: just URL (page numbers handled by NumberedCanvas)
         canvas.drawString(50, 10, "https://ryanmcl.myportfolio.com/")
@@ -982,7 +997,7 @@ class NumberedCanvas(canvas.Canvas):
         self.setFillColor(white)
         font_name = 'Arial' if 'Arial' in pdfmetrics.getRegisteredFontNames() else 'Helvetica'
         self.setFont(font_name, 6)
-        self.drawRightString(A4[0] - 50, 10, f"{page_num}/{total_pages}")
+        self.drawRightString(self._pagesize[0] - 50, 10, f"{page_num}/{total_pages}")
 
 def format_duration(seconds):
     """Format duration in a human-readable format"""
@@ -1009,7 +1024,7 @@ def format_file_size(bytes_size):
 # Global document title (first ### heading)
 document_title = ""
 
-def build_pdf(input_file, output_file, date="June 2024", optimization_stats=None):
+def build_pdf(input_file, output_file, date="June 2024", optimization_stats=None, page_dims=A4):
     global document_title
 
     if not os.path.exists(input_file):
@@ -1039,20 +1054,30 @@ def build_pdf(input_file, output_file, date="June 2024", optimization_stats=None
                 if line.strip().startswith("### "):
                     document_title = clean_markdown_escapes(line.strip()[4:])
                     break
+    
+    # Extract page dimensions
+    page_width, page_height = page_dims
 
     # Create PDF document with dark theme and compression
+    left_margin, right_margin = 50, 50
+    top_margin, bottom_margin = 80, 60
+
     doc = BaseDocTemplate(
         output_file,
-        pagesize=A4,
-        rightMargin=50,
-        leftMargin=50,
-        topMargin=80,  # More space for header
-        bottomMargin=60,  # More space for footer
+        pagesize=page_dims,
+        rightMargin=right_margin,
+        leftMargin=left_margin,
+        topMargin=top_margin,
+        bottomMargin=bottom_margin,
         compress=True  # Enable PDF compression for smaller file size
     )
 
+    # Calculate frame dimensions based on page size and margins
+    frame_width = page_width - left_margin - right_margin
+    frame_height = page_height - top_margin - bottom_margin
+
     # Create a frame for content (adjusted for headers/footers)
-    frame = Frame(50, 60, A4[0] - 100, A4[1] - 140, leftPadding=0, bottomPadding=0, rightPadding=0, topPadding=0)
+    frame = Frame(left_margin, bottom_margin, frame_width, frame_height, leftPadding=0, bottomPadding=0, rightPadding=0, topPadding=0)
 
     # Add the dark page template with title and date
     dark_template = DarkPageTemplate(
@@ -1060,7 +1085,8 @@ def build_pdf(input_file, output_file, date="June 2024", optimization_stats=None
         frames=[frame],
         document_title=document_title,
         date=date,
-        header_font=header_font
+        header_font=header_font,
+        pagesize=page_dims
     )
     doc.addPageTemplates([dark_template])
 
@@ -1085,7 +1111,7 @@ def build_pdf(input_file, output_file, date="June 2024", optimization_stats=None
         print("🎨 Smart collaging enabled - consecutive images will be grouped when beneficial")
 
         # Process lines with collaging support
-        process_lines_with_collaging(lines, styles, story, missing_files, optimization_stats)
+        process_lines_with_collaging(lines, styles, story, missing_files, optimization_stats, frame_width=frame_width, frame_height=frame_height)
 
         processing_end = time.time()
         processing_time = processing_end - processing_start
@@ -1215,22 +1241,37 @@ def pre_check_duplicates(input_file_path):
 def main():
     """Main entry point - uses input from 'source_files' and outputs to 'outputs' folder"""
     input_dir = "source_files"
-    input_file_name = "China 2025 Bridges.md"
+    input_file_name = "China 2025 North test1.md"
     input_file = os.path.join(input_dir, input_file_name)
     
+    # --- PAGE SIZE SELECTION ---
+    # Choose one of the following options by uncommenting the desired block.
+    
+    # 1. Standard A4 Portrait (Default)
+    page_size_name = "A4_Portrait"
+    page_size = A4
+    
+    # 2. A4 Landscape
+    # page_size_name = "A4_Landscape"
+    # page_size = landscape(A4)
+    
+    # 3. Custom Size (e.g., 170mm x 240mm)
+    # page_size_name = "170x240mm"
+    # page_size = (170*mm, 240*mm)
+
     # Create outputs folder if it doesn't exist
     output_dir = "output_gemini"
     os.makedirs(output_dir, exist_ok=True)
 
     # Generate output file path with same base name as input
-    base_name = os.path.splitext(input_file_name)[0]
-    output_file = os.path.join(output_dir, f"{base_name}.pdf")
+    base_name = "landscape_test3row"
+    output_file = os.path.join(output_dir, f"{base_name}_{page_size_name}.pdf")
 
     date = "February 2025 Chinese New Year"  # Change this to your desired date
 
     print("=== Optimized Markdown to PDF Converter with Smart Collaging ===")
     
-    # --- NEW: Run pre-check for duplicate images ---
+    # --- Run pre-check for duplicate images ---
     if not pre_check_duplicates(input_file):
         sys.exit(1)
 
@@ -1244,7 +1285,7 @@ def main():
         print("⚠️ Image optimization unavailable - install Pillow for best results")
         print("🎨 Smart collaging enabled - layout will be optimized even without image optimization\n")
 
-    # --- NEW: Stats dict created here to be passed around ---
+    # --- Stats dict created here to be passed around ---
     final_stats = {
         'optimized_count': 0,
         'unchanged_count': 0,
@@ -1254,13 +1295,13 @@ def main():
 
     # Start overall timing
     start_time = time.time()
-    success, build_time = build_pdf(input_file, output_file, date, final_stats)
+    success, build_time = build_pdf(input_file, output_file, date, final_stats, page_dims=page_size)
     end_time = time.time()
     
     print()
     if success:
         print("🎉 Conversion completed successfully!")
-        # --- NEW: Word count in final summary ---
+        # --- Word count in final summary ---
         if final_stats['word_count'] > 0:
             print(f"✍️  Document word count: {final_stats['word_count']} words")
         print(f"⏱️ Total script execution time: {format_duration(build_time)}")
